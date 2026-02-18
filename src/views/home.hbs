@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{title}} - Doc2Learn</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <a href="/" class="logo">Doc2Learn</a>
+    <div class="nav-links">
+      <a href="/">Documents</a>
+    </div>
+  </nav>
+  <main class="container">
+    <div class="home">
+      <h1>My Documents</h1>
+
+      <form class="add-document-form" id="addDocumentForm">
+        <input type="url" name="url" placeholder="Enter document URL..." required>
+        <button type="submit" class="btn btn-primary">Add Document</button>
+      </form>
+
+      <div class="documents-list">
+        {{#if documents.length}}
+          {{#each documents}}
+            <div class="document-card">
+              <h3><a href="/view/{{this.id}}">{{this.title}}</a></h3>
+              <p class="url">{{this.url}}</p>
+              <p class="date">Updated: {{this.updatedAt}}</p>
+              <button class="btn delete-btn" data-id="{{this.id}}">Delete</button>
+            </div>
+          {{/each}}
+        {{else}}
+          <p class="empty">No documents yet. Add one above!</p>
+        {{/if}}
+      </div>
+    </div>
+  </main>
+
+  <script>
+document.getElementById('addDocumentForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const url = e.target.url.value;
+  const btn = e.target.querySelector('button');
+  btn.disabled = true;
+  btn.textContent = 'Processing...';
+
+  try {
+    const res = await fetch('/documents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    const data = await res.json();
+    window.location.href = '/view/' + data.id;
+  } catch (err) {
+    alert('Failed to add document');
+    btn.disabled = false;
+    btn.textContent = 'Add Document';
+  }
+});
+
+document.querySelectorAll('.delete-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if (!confirm('Delete this document?')) return;
+    const id = btn.dataset.id;
+    await fetch('/documents/' + id, { method: 'DELETE' });
+    window.location.reload();
+  });
+});
+  </script>
+</body>
+</html>

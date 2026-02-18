@@ -1,0 +1,11 @@
+{
+  "llm": {
+    "providers": {
+      "gemini": { "apiKey": "" },
+      "openai": { "apiKey": "" },
+      "claude": { "apiKey": "" }
+    },
+    "order": ["gemini", "openai", "claude"]
+  },
+  "language": "ko"
+}

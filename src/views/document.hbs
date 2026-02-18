@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{title}} - Doc2Learn</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <a href="/" class="logo">Doc2Learn</a>
+    <div class="nav-links">
+      <a href="/">Documents</a>
+    </div>
+  </nav>
+  <main class="container">
+    <div class="document-view">
+      <header class="doc-header">
+        <div class="doc-header-content">
+          <h1>{{meta.title}}</h1>
+          <p class="doc-url">
+            <a href="{{meta.url}}" target="_blank" rel="noopener">{{meta.url}}</a>
+          </p>
+        </div>
+        <div class="doc-actions">
+          <button id="checkUpdateBtn" class="btn btn-secondary">Check Updates</button>
+          <button id="quizBtn" class="btn btn-primary">Take Quiz</button>
+        </div>
+      </header>
+
+      <div class="sections-container" id="sectionsContainer"></div>
+    </div>
+
+    <div id="quizModal" class="modal" style="display:none;">
+      <div class="modal-overlay" onclick="closeQuizModal()"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Quiz</h2>
+          <button class="modal-close" onclick="closeQuizModal()">&times;</button>
+        </div>
+        <div id="quizContent"></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>
+const docId = '{{meta.id}}';
+const sectionsData = {{{json translation.sections}}};
+
+document.addEventListener('DOMContentLoaded', function() {
+  renderSections();
+  loadAllChats();
+});
+
+function renderSections() {
+  const container = document.getElementById('sectionsContainer');
+
+  if (typeof marked !== 'undefined') {
+    marked.setOptions({
+      breaks: true,
+      gfm: true
+    });
+  }
+
+  sectionsData.forEach((section, index) => {
+    const sectionEl = document.createElement('section');
+    sectionEl.className = 'section-block';
+    sectionEl.dataset.sectionId = section.id;
+
+    const renderedContent = typeof marked !== 'undefined'
+      ? marked.parse(section.content)
+      : section.content.replace(/\n/g, '<br>');
+
+    sectionEl.innerHTML = `
+      <div class="section-header">
+        <div class="section-number">${index}</div>
+        <h2 class="section-title">${escapeHtml(section.title)}</h2>
+      </div>
+      <div class="section-body">
+        <article class="section-content markdown-body">${renderedContent}</article>
+        <div class="section-chat">
+          <div class="chat-header">
+            <span>Ask about this section</span>
+          </div>
+          <div class="chat-messages" id="chat-${section.id}"></div>
+          <form class="chat-form" onsubmit="sendChat(event, '${docId}', ${section.id})">
+            <input type="text" placeholder="Type your question..." required>
+            <button type="submit" class="btn btn-send">Send</button>
+          </form>
+        </div>
+      </div>
+    `;
+
+    container.appendChild(sectionEl);
+  });
+
+  if (typeof hljs !== 'undefined') {
+    document.querySelectorAll('pre code').forEach((block) => {
+      hljs.highlightElement(block);
+    });
+  }
+}
+
+function loadAllChats() {
+  document.querySelectorAll('.section-block').forEach(section => {
+    const sectionId = section.dataset.sectionId;
+    loadChat(sectionId);
+  });
+}
+
+async function loadChat(sectionId) {
+  const res = await fetch('/documents/' + docId + '/sections/' + sectionId + '/chat');
+  const messages = await res.json();
+  const container = document.getElementById('chat-' + sectionId);
+  container.innerHTML = messages.map(m => {
+    const content = m.role === 'assistant' && typeof marked !== 'undefined'
+      ? marked.parse(m.content)
+      : escapeHtml(m.content);
+    return '<div class="message ' + m.role + '"><div class="message-content">' + content + '</div></div>';
+  }).join('');
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+async function sendChat(e, docId, sectionId) {
+  e.preventDefault();
+  const input = e.target.querySelector('input');
+  const message = input.value;
+  input.value = '';
+
+  const container = document.getElementById('chat-' + sectionId);
+  container.innerHTML += '<div class="message user"><div class="message-content">' + escapeHtml(message) + '</div></div>';
+  container.innerHTML += '<div class="message assistant loading"><div class="message-content"><span class="typing-indicator"><span></span><span></span><span></span></span></div></div>';
+  container.scrollTop = container.scrollHeight;
+
+  const res = await fetch('/documents/' + docId + '/sections/' + sectionId + '/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message })
+  });
+  const data = await res.json();
+
+  container.lastChild.classList.remove('loading');
+  const responseContent = typeof marked !== 'undefined'
+    ? marked.parse(data.response)
+    : escapeHtml(data.response);
+  container.lastChild.querySelector('.message-content').innerHTML = responseContent;
+  container.scrollTop = container.scrollHeight;
+}
+
+document.getElementById('checkUpdateBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('checkUpdateBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Checking...';
+
+  try {
+    const res = await fetch('/documents/' + docId + '/check-update');
+    const data = await res.json();
+    if (data.hasUpdate) {
+      if (confirm('Document has been updated. Refresh translation?')) {
+        await fetch('/documents/' + docId + '/refresh', { method: 'POST' });
+        window.location.reload();
+      }
+    } else {
+      showToast('Document is up to date!', 'success');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Check Updates';
+  }
+});
+
+document.getElementById('quizBtn').addEventListener('click', async () => {
+  document.getElementById('quizModal').style.display = 'flex';
+  document.getElementById('quizContent').innerHTML = '<div class="quiz-loading"><span class="spinner"></span><p>Loading quiz...</p></div>';
+
+  let res = await fetch('/documents/' + docId + '/quiz');
+  let data = await res.json();
+
+  if (!data.record || !data.record.quizzes.length) {
+    document.getElementById('quizContent').innerHTML = '<div class="quiz-loading"><span class="spinner"></span><p>Generating quiz...</p></div>';
+    res = await fetch('/documents/' + docId + '/quiz/generate', { method: 'POST' });
+    data = await res.json();
+    data = { record: { quizzes: data.quizzes, results: [] } };
+  }
+
+  renderQuiz(data.record);
+});
+
+function closeQuizModal() {
+  document.getElementById('quizModal').style.display = 'none';
+}
+
+function renderQuiz(record) {
+  const container = document.getElementById('quizContent');
+  let html = '';
+
+  record.quizzes.forEach((quiz, i) => {
+    const result = record.results.find(r => r.quizIndex === i);
+    const statusClass = result ? (result.score >= 70 ? 'correct' : 'incorrect') : '';
+
+    html += '<div class="quiz-item ' + statusClass + '">';
+    html += '<div class="quiz-number">Q' + (i+1) + '</div>';
+    html += '<p class="quiz-question">' + escapeHtml(quiz.question) + '</p>';
+
+    if (quiz.type === 'multiple_choice' && quiz.options) {
+      html += '<div class="quiz-options">';
+      quiz.options.forEach((opt, j) => {
+        html += '<label class="quiz-option"><input type="radio" name="q' + i + '" value="' + j + '"><span class="option-text">' + escapeHtml(opt) + '</span></label>';
+      });
+      html += '</div>';
+    } else {
+      html += '<textarea class="quiz-textarea" data-quiz="' + i + '" placeholder="Write your answer here..."></textarea>';
+    }
+
+    if (result) {
+      html += '<div class="quiz-result"><div class="result-score">' + result.score + '<span>/100</span></div><p class="result-feedback">' + escapeHtml(result.feedback) + '</p></div>';
+    } else {
+      html += '<button class="btn btn-primary quiz-submit" onclick="submitQuizAnswer(' + i + ', \'' + quiz.type + '\')">Submit Answer</button>';
+    }
+    html += '</div>';
+  });
+
+  container.innerHTML = html;
+}
+
+async function submitQuizAnswer(quizIndex, type) {
+  let answer;
+  if (type === 'multiple_choice') {
+    const selected = document.querySelector('input[name="q' + quizIndex + '"]:checked');
+    if (!selected) { showToast('Please select an answer', 'error'); return; }
+    answer = selected.parentElement.textContent.trim();
+  } else {
+    answer = document.querySelector('textarea[data-quiz="' + quizIndex + '"]').value;
+    if (!answer.trim()) { showToast('Please enter an answer', 'error'); return; }
+  }
+
+  const res = await fetch('/documents/' + docId + '/quiz/' + quizIndex + '/answer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answer })
+  });
+  const result = await res.json();
+
+  showToast('Score: ' + result.score + '/100', result.score >= 70 ? 'success' : 'warning');
+
+  const quizRes = await fetch('/documents/' + docId + '/quiz');
+  const quizData = await quizRes.json();
+  renderQuiz(quizData.record);
+}
+
+function showToast(message, type = 'info') {
+  const toast = document.createElement('div');
+  toast.className = 'toast toast-' + type;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.classList.add('show'), 10);
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+  </script>
+</body>
+</html>
